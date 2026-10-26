@@ -66,14 +66,28 @@ uv sync --python 3.12
 
 ## Run the viewer
 
-Pass the dataset root directory with `--root`. It should contain patient
-directories such as `UVM-063`, with the CT, MR, and optional RTSTRUCT folders
-inside each patient directory.
+The dataset root directory should contain patient directories such as
+`UVM-063`, with the CT, MR, and optional RTSTRUCT folders inside each patient
+directory. By default, the viewer uses the values in `config.py`:
+
+- `DATASET_ROOT` is the dataset directory.
+- `PATIENT_ID` is the patient to open (currently `28`).
+
+### Option 1: Run in VS Code using `config.py`
+
+Edit `DATASET_ROOT` and `PATIENT_ID` in `config.py` as needed. In VS Code,
+select the project's `.venv` Python interpreter, open `uvm_dataset_reader.py`,
+and choose **Run Python File**. The configured patient and dataset path are
+used when no command-line options are supplied.
+
+### Option 2: Run from the command line
+
+Pass `--root` and `--patient` to override the defaults from `config.py`:
 
 Windows (PowerShell):
 
 ```powershell
-uv run python .\uvm_dataset_reader.py --patient 63 --root "D:\path\to\UVM_RAD_DATASET_FINAL"
+uv run python .\uvm_dataset_reader.py --patient 28 --root "D:\FNO_image_segmentation\TCIA uveal - anonym\UVM_RAD_DATASET_FINAL"
 ```
 
 macOS or Linux:
@@ -82,7 +96,8 @@ macOS or Linux:
 uv run python uvm_dataset_reader.py --patient 63 --root "/path/to/UVM_RAD_DATASET_FINAL"
 ```
 
-The patient can be provided as a number (`63`) or an ID (`UVM-063`). To see
+The patient can be provided as a number (`63`) or an ID (`UVM-063`). If
+`--patient` or `--root` is omitted, its value from `config.py` is used. To see
 all available options:
 
 ```sh

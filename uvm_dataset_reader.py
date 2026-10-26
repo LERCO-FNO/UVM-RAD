@@ -22,8 +22,9 @@ import pydicom
 import SimpleITK as sitk
 from skimage.draw import polygon
 
+from config import DATASET_ROOT, PATIENT_ID
+
 LOG = logging.getLogger('uvm-reader')
-DEFAULT_ROOT = Path(r'D:\FNO_image_segmentation\TCIA uveal - anonym\UVM_RAD_DATASET_FINAL')
 MR_PREFIXES = ('MR1_', 'MR2_', 'MR3_', 'MR4_')
 COLORS = {
     'GTV': '#ff3b30', 'PTV': '#ffb000', 'Eye_R': '#00bcd4',
@@ -237,8 +238,8 @@ def launch(root: Path, patient: str, no_rtstruct: bool = False) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description='View a single UVM-RAD patient in Napari (read-only)')
-    parser.add_argument('--root', type=Path, default=DEFAULT_ROOT, help='Root of UVM_RAD_DATASET_FINAL')
-    parser.add_argument('--patient', required=True, help='Number or ID, e.g. 63 or UVM-063')
+    parser.add_argument('--root', type=Path, default=DATASET_ROOT, help='Root of UVM_RAD_DATASET_FINAL')
+    parser.add_argument('--patient', default=PATIENT_ID, help='Number or ID, e.g. 63 or UVM-063')
     parser.add_argument('--no-rtstruct', action='store_true', help='Load CT/MR without contour rasterization')
     parser.add_argument('--debug', action='store_true', help='Verbose logging')
     args = parser.parse_args()
