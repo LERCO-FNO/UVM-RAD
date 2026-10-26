@@ -1,8 +1,8 @@
 """UVM-RAD DICOM patient viewer (read-only).
 
 Usage:
-  python uvm_dataset_reader.py --patient 63
-  python uvm_dataset_reader.py --patient UVM-063 --root 'D:\\...\\UVM_RAD_DATASET_FINAL'
+  python uvm_dataset_reader.py --patient 1
+  python uvm_dataset_reader.py --patient UVM-001 --root 'D:\\...\\UVM_RAD_DATASET_FINAL'
 
 Shows CT, available MR series and RTSTRUCT contours as Napari labels.
 Images use their physical DICOM transforms (LPS) for display; no MRI-to-CT
