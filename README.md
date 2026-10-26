@@ -71,7 +71,7 @@ The dataset root directory should contain patient directories such as
 directory. By default, the viewer uses the values in `config.py`:
 
 - `DATASET_ROOT` is the dataset directory.
-- `PATIENT_ID` is the patient to open (currently `28`).
+- `PATIENT_ID` is the patient to open (currently `1`).
 
 ### Option 1: Run in VS Code using `config.py`
 

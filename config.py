@@ -2,4 +2,4 @@
 from pathlib import Path
 
 DATASET_ROOT = Path(r'D:\FNO_image_segmentation\TCIA uveal - anonym\UVM_RAD_DATASET_FINAL')
-PATIENT_ID = '28'
+PATIENT_ID = '1'
