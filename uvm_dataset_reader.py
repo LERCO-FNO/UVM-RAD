@@ -24,6 +24,7 @@ from skimage.draw import polygon
 
 from config import DATASET_ROOT, PATIENT_ID
 
+
 LOG = logging.getLogger('uvm-reader')
 MR_PREFIXES = ('MR1_', 'MR2_', 'MR3_', 'MR4_')
 COLORS = {
@@ -59,10 +60,65 @@ def discover_series(folder: Path) -> list[list[str]]:
     return series
 
 
+def ensure_dicom_geometry(image: sitk.Image, names: list[str], label: str) -> sitk.Image:
+    """Reconcile SimpleITK volume geometry with original per-slice DICOM IPPs.
+
+    ImageSeriesReader occasionally returns an inconsistent through-plane
+    direction for a series. The data array is untouched; only the image's
+    physical-coordinate metadata is corrected after strict DICOM checks.
+    """
+    if len(names) != image.GetSize()[2] or len(names) < 2:
+        return image
+
+    # The files are passed to ImageSeriesReader in this order; output z=0
+    # corresponds to names[0].  Check first, middle and last, not just endpoints.
+    sample_ids = sorted({0, len(names) // 2, len(names) - 1})
+    samples = [pydicom.dcmread(names[i], stop_before_pixels=True) for i in sample_ids]
+    try:
+        ipps = [np.asarray(ds.ImagePositionPatient, dtype=float) for ds in samples]
+        orientation = np.asarray(samples[0].ImageOrientationPatient, dtype=float)
+    except (AttributeError, ValueError, TypeError):
+        return image
+    if orientation.shape != (6,) or any(p.shape != (3,) for p in ipps):
+        return image
+    row = orientation[:3]
+    col = orientation[3:]
+    normal = np.cross(row, col)
+    norm = np.linalg.norm(normal)
+    if norm < 0.99 or abs(np.dot(row, col)) > 1e-3:
+        raise ValueError(f'{label}: invalid DICOM ImageOrientationPatient')
+    normal /= norm
+    delta = (ipps[-1] - ipps[0]) / (sample_ids[-1] - sample_ids[0])
+    dz = float(np.linalg.norm(delta))
+    if dz <= 0 or abs(abs(np.dot(delta, normal)) - dz) > 0.01:
+        raise ValueError(f'{label}: inconsistent DICOM slice orientation')
+    for i, p in zip(sample_ids, ipps):
+        expected = ipps[0] + delta * (i - sample_ids[0])
+        if np.linalg.norm(p - expected) > 0.10:
+            raise ValueError(f'{label}: irregular DICOM slice positions; cannot safely fix geometry')
+    # The first DICOM position and the order of file names are authoritative.
+    # Columns correspond to SITK image axes X, Y, Z in LPS coordinates.
+    direction = np.column_stack((row, col, delta / dz))
+    expected_origin = ipps[0]
+    original_dir = np.asarray(image.GetDirection(), dtype=float).reshape(3, 3)
+    original_origin = np.asarray(image.GetOrigin(), dtype=float)
+    original_z = image.GetSpacing()[2]
+    if (np.linalg.norm(original_dir - direction) > 1e-4
+            or np.linalg.norm(original_origin - expected_origin) > 0.05
+            or abs(original_z - dz) > 0.05):
+        LOG.info('%s: correcting inconsistent SimpleITK geometry from DICOM IPP/IOP', label)
+        image.SetOrigin(tuple(expected_origin))
+        image.SetDirection(tuple(direction.reshape(-1)))
+        spacing = image.GetSpacing()
+        image.SetSpacing((spacing[0], spacing[1], dz))
+    return image
+
+
 def load_volume(names: list[str]):
     reader = sitk.ImageSeriesReader()
     reader.SetFileNames(names)
     image = reader.Execute()
+    image = ensure_dicom_geometry(image, names, Path(names[0]).parent.name)
     if image.GetDimension() != 3:
         raise ValueError(f'Expected 3D image, got dimension {image.GetDimension()}')
     arr = sitk.GetArrayFromImage(image)
@@ -239,7 +295,7 @@ def launch(root: Path, patient: str, no_rtstruct: bool = False) -> None:
 def main():
     parser = argparse.ArgumentParser(description='View a single UVM-RAD patient in Napari (read-only)')
     parser.add_argument('--root', type=Path, default=DATASET_ROOT, help='Root of UVM_RAD_DATASET_FINAL')
-    parser.add_argument('--patient', default=PATIENT_ID, help='Number or ID, e.g. 63 or UVM-063')
+    parser.add_argument('--patient', default=PATIENT_ID, help='Number or ID, e.g. 1 or UVM-001')
     parser.add_argument('--no-rtstruct', action='store_true', help='Load CT/MR without contour rasterization')
     parser.add_argument('--debug', action='store_true', help='Verbose logging')
     args = parser.parse_args()
