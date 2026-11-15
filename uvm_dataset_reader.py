@@ -128,6 +128,63 @@ def load_volume(names: list[str]):
     return image, arr, ds
 
 
+def robust_contrast_limits(data: np.ndarray, max_samples: int = 262144) -> tuple[float, float]:
+    """Estimate display-only 1--99% limits using a bounded, distributed sample.
+
+    Flat indexing avoids flattening/copying a whole non-contiguous volume.
+    Zeros are treated as background only for nonnegative, varying foreground;
+    signed data and binary/constant foreground retain their meaningful zeros.
+    Sampling is approximate for large volumes and never modifies the input.
+    """
+    if max_samples < 2:
+        raise ValueError('max_samples must be at least 2')
+    if not data.size:
+        return (0.0, 1.0)
+    indices = np.linspace(0, data.size - 1, min(data.size, max_samples), dtype=np.intp)
+    values = np.asarray(data.flat[indices], dtype=np.float64)
+    values = values[np.isfinite(values)]
+    if not values.size:
+        return (0.0, 1.0)
+    if values.min() >= 0:
+        foreground = values[values != 0]
+        if foreground.size >= 2 and foreground.min() < foreground.max():
+            values = foreground
+    # Scaling the sample prevents overflow in percentile interpolation for
+    # finite values near the float64 extremes (including opposite signs).
+    scale = float(np.max(np.abs(values)))
+    low, high = np.percentile(values / scale if scale else values, (1, 99))
+    low, high = float(low * scale), float(high * scale)
+    if low >= high:
+        low, high = float(values.min()), float(values.max())
+    if low >= high:
+        pad = max(abs(low) * 0.01, 0.5)
+        bound = np.finfo(np.float64).max
+        low = low - pad if low >= -bound + pad else -bound
+        high = high + pad if high <= bound - pad else bound
+    return (low, high)
+
+
+def ct_contrast_limits(data: np.ndarray, ds) -> tuple[float, float]:
+    """Window SimpleITK/GDCM output, whose DICOM rescale is already applied.
+
+    Require valid rescale tags and HU units. Classic CT defaults to HU when
+    RescaleType is absent; ambiguous/non-HU images use robust data limits.
+    This helper must not be used for raw pydicom pixel_array values.
+    """
+    try:
+        slope = float(ds.RescaleSlope)
+        intercept = float(ds.RescaleIntercept)
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return robust_contrast_limits(data)
+    units = str(getattr(ds, 'RescaleType', '')).strip().upper()
+    classic_ct = str(getattr(ds, 'SOPClassUID', '')) == '1.2.840.10008.5.1.4.1.1.2'
+    if (str(getattr(ds, 'Modality', '')).upper() == 'CT'
+            and np.isfinite(slope) and slope != 0 and np.isfinite(intercept)
+            and (units == 'HU' or (not units and classic_ct))):
+        return (-160.0, 240.0)
+    return robust_contrast_limits(data)
+
+
 def affine_zyx(image: sitk.Image) -> np.ndarray:
     """Napari voxel ZYX -> patient LPS physical coordinates ordered ZYX (mm)."""
     direction = np.asarray(image.GetDirection(), dtype=np.float64).reshape(3, 3)
@@ -241,9 +298,8 @@ def launch(root: Path, patient: str, no_rtstruct: bool = False) -> None:
         LOG.warning('More than one CT series; using the first one.')
     viewer = napari.Viewer(title=f'UVM-RAD | {patient} | CT and MR + RTSTRUCT', ndisplay=2)
     ct_layer = viewer.add_image(ct_data, name='CT', colormap='gray',
-                                affine=affine_zyx(ct_image), visible=True)
-    # Sensible starting window for head CT without altering source data.
-    ct_layer.contrast_limits = (-150, 300)
+                                affine=affine_zyx(ct_image), visible=True,
+                                contrast_limits=ct_contrast_limits(ct_data, ct_ds))
     loaded = [('CT', ct_data.shape)]
     for folder in sorted(patient_dir.iterdir()):
         if not folder.is_dir() or not folder.name.startswith(MR_PREFIXES):
@@ -256,7 +312,8 @@ def launch(root: Path, patient: str, no_rtstruct: bool = False) -> None:
                 if ct_for and mr_for not in ct_for:
                     LOG.warning('%s has different FrameOfReferenceUID from CT. No registration is performed; avoid interpreting overlaps.', label)
                 viewer.add_image(data, name=label, colormap='gray',
-                                 affine=affine_zyx(image), visible=False)
+                                 affine=affine_zyx(image), visible=False,
+                                 contrast_limits=robust_contrast_limits(data))
                 loaded.append((label, data.shape))
             except Exception as exc:
                 LOG.exception('Could not load %s series %d: %s', folder, j, exc)
